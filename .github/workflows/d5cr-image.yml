@@ -1,0 +1,64 @@
+name: Publish checked d5cr image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d5cr-image
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'd5cr/CLIProxyAPI'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 1f87755f6a5d6c6662ce70a5ed0717f788a80302
+          persist-credentials: false
+      - name: Verify source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '1f87755f6a5d6c6662ce70a5ed0717f788a80302'
+          echo "date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish runtime
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/d5cr/cliproxyapi:1f87755f6a5d6c6662ce70a5ed0717f788a80302
+          labels: |
+            org.opencontainers.image.source=https://github.com/d5cr/CLIProxyAPI
+            org.opencontainers.image.revision=1f87755f6a5d6c6662ce70a5ed0717f788a80302
+            org.opencontainers.image.version=v8.0.13-d5cr.1
+          build-args: |
+            VERSION=v8.0.13-d5cr.1
+            COMMIT=1f87755f6a5d6c6662ce70a5ed0717f788a80302
+            BUILD_DATE=${{ steps.source.outputs.date }}
+          cache-from: type=gha,scope=d5cr-amd64
+          cache-to: type=gha,mode=max,scope=d5cr-amd64
+      - name: Record published digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf '%s@%s\n' 'ghcr.io/d5cr/cliproxyapi' "$DIGEST" >> "$GITHUB_STEP_SUMMARY"
